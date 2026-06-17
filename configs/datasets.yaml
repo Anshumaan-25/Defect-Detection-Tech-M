@@ -54,10 +54,10 @@ datasets:
   - name: mvtec_ad
     modality: anomaly
     source: mvtec
-    enabled: false          # license-gated; enable after providing the archive/url
+    enabled: true
     params:
-      url: "REPLACE_ME_https://your-mirror/mvtec_anomaly_detection.tar.xz"
-      categories: []        # optional subset to verify, e.g. ["bottle", "cable"]; [] = all 15
+      url: ""
+      categories: ["metal_nut"]
 
   # --- OCR: label text images (wrong-label verification) ------------------
   # Optional. You can also just drop label crops into data/raw/ocr/ directly;
