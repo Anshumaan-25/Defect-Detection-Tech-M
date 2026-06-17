@@ -1,0 +1,70 @@
+# ──────────────────────────────────────────────────────────────────────────
+# Dataset registry — single source of truth for what gets downloaded.
+# Read by src/dataset_loader.py. Add a dataset = add a block here.
+#
+# Each entry:
+#   name      short id; becomes the on-disk folder name (no spaces).
+#   modality  yolo | anomaly | ocr  -> decides where it lands + how it's used.
+#   source    roboflow | url        -> picks the downloader in dataset_loader.py.
+#   enabled   false to skip without deleting the block.
+#   params    source-specific arguments (see examples below).
+#
+# IMPORTANT: the placeholder workspace/project/version values below are
+# EXAMPLES. Open the dataset on Roboflow Universe, click "Download Dataset" ->
+# "show download code", and copy the real workspace / project / version into
+# the matching fields. Then flip `enabled: true`.
+# ──────────────────────────────────────────────────────────────────────────
+
+datasets:
+
+  # --- Object detection: missing components (PCB inspection) ---------------
+  # Primary dataset for the "missing components" detector.
+  # Source: https://universe.roboflow.com/cnn-pcb-defect-detection/pcb-defect-detection-ultra
+  - name: pcb_defects
+    modality: yolo
+    source: roboflow
+    enabled: true
+    params:
+      workspace: "cnn-pcb-defect-detection"
+      project: "pcb-defect-detection-ultra"
+      version: "latest"     # resolved to the highest version at download time
+      format: "yolov8"
+
+  # --- Object detection: damaged packaging (bottle inspection) ------------
+  - name: bottle_inspection
+    modality: yolo
+    source: roboflow
+    enabled: false
+    params:
+      workspace: "REPLACE_ME_workspace_slug"
+      project: "REPLACE_ME_project_slug"
+      version: 1
+      format: "yolov8"
+
+  # --- Surface defects: MVTec AD (anomaly detection) ----------------------
+  # MVTec AD is research-license gated, so it can't be pulled anonymously.
+  # Provide it ONE of two ways, then flip `enabled: true`:
+  #   (a) Download mvtec_anomaly_detection.tar.xz from
+  #       https://www.mvtec.com/company/research/datasets/mvtec-ad and drop the
+  #       archive into data/raw/anomaly/mvtec_ad/  (leave url as REPLACE_ME), or
+  #   (b) Host the archive on a URL you control and paste it into `url` below.
+  # The `mvtec` loader extracts, flattens any wrapper folder, and verifies the
+  # category layout that anomalib's MVTecAD datamodule expects:
+  #   data/raw/anomaly/mvtec_ad/<category>/{train,test,ground_truth}/...
+  - name: mvtec_ad
+    modality: anomaly
+    source: mvtec
+    enabled: false          # license-gated; enable after providing the archive/url
+    params:
+      url: "REPLACE_ME_https://your-mirror/mvtec_anomaly_detection.tar.xz"
+      categories: []        # optional subset to verify, e.g. ["bottle", "cable"]; [] = all 15
+
+  # --- OCR: label text images (wrong-label verification) ------------------
+  # Optional. You can also just drop label crops into data/raw/ocr/ directly;
+  # EasyOCR needs no training, only sample images to test the read+compare logic.
+  # - name: label_samples
+  #   modality: ocr
+  #   source: url
+  #   enabled: false
+  #   params:
+  #     url: "REPLACE_ME_https://.../label_samples.zip"

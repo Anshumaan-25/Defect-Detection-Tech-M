@@ -1,0 +1,52 @@
+# ──────────────────────────────────────────────────────────────────────────
+# Defect Detection — Python dependencies
+# ──────────────────────────────────────────────────────────────────────────
+# Tested with Python 3.10 / 3.11. On Google Colab most of these are
+# pre-installed; locally, install into a fresh virtual environment:
+#
+#   python -m venv .venv && source .venv/bin/activate   (Windows: .venv\Scripts\activate)
+#   pip install -r requirements.txt
+#
+# NOTE on PyTorch: the lines below install the default (CPU/GPU-auto) wheels,
+# which is correct for Colab and for CPU-only laptops. If you need a specific
+# CUDA build locally, install torch first from https://pytorch.org, then run
+# this file.
+# ──────────────────────────────────────────────────────────────────────────
+
+# --- Core deep learning ---------------------------------------------------
+torch>=2.2.0
+torchvision>=0.17.0
+
+# --- Object detection (missing components, damaged packaging) -------------
+ultralytics>=8.2.0          # YOLO training + inference
+
+# --- Surface-defect anomaly detection (MVTec AD) --------------------------
+anomalib>=1.1.0             # PatchCore / PaDiM etc.; pulls lightning + timm
+pandas<3.0                  # anomalib 2.x assumes object-dtype string columns;
+                            # pandas>=3.0's StringArray breaks its split filters
+                            # (every train/test split silently returns 0 rows).
+                            # Verified: pandas 2.3.x works, 3.0.x does not.
+
+# --- OCR (wrong-label verification) ---------------------------------------
+easyocr>=1.7.1
+
+# --- Dataset sourcing / management ----------------------------------------
+roboflow>=1.1.30            # pull YOLO datasets from Roboflow Universe
+kaggle>=1.6.0               # optional fallback source for public datasets
+requests>=2.31.0            # plain HTTP downloads (e.g. MVTec mirror)
+tqdm>=4.66.0                # download / processing progress bars
+
+# --- Image + array handling -----------------------------------------------
+opencv-python-headless>=4.9.0
+numpy>=1.26.0
+Pillow>=10.2.0
+
+# --- Config + utilities ----------------------------------------------------
+PyYAML>=6.0.1               # dataset registry / pipeline configs
+python-dotenv>=1.0.1        # load API keys from a local .env file
+
+# --- Demo app (future: Streamlit / Gradio wrapper) ------------------------
+# Kept here so the inference UI stays a one-line install away. Uncomment when
+# you build the demo; left commented to keep the training image lean.
+# streamlit>=1.34.0
+# gradio>=4.31.0
