@@ -25,6 +25,10 @@ env/
 runs/
 wandb/
 
+# --- Demo / inference output images (generated, not versioned) -------------
+result_*.png
+demo_output_*.png
+
 # --- OS / editor -----------------------------------------------------------
 .DS_Store
 .vscode/
