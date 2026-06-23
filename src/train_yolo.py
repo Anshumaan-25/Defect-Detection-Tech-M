@@ -79,6 +79,7 @@ def train(
     epochs: int = 100,
     imgsz: int = 640,
     batch: int = 16,
+    workers: int = 8,
     device: str | None = None,
     run_name: str | None = None,
 ):
@@ -107,6 +108,7 @@ def train(
         epochs=epochs,
         imgsz=imgsz,
         batch=batch,
+        workers=workers,
         device=device,
         project=str(config.YOLO_WEIGHTS_DIR),
         name=run_name,
@@ -136,6 +138,10 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--imgsz", type=int, default=640, help="image size (default: 640)")
     parser.add_argument("--batch", type=int, default=16, help="batch size (default: 16)")
     parser.add_argument(
+        "--workers", type=int, default=8,
+        help="dataloader workers; lower on RAM-limited machines to avoid OOM (default: 8)",
+    )
+    parser.add_argument(
         "--device", default=None,
         help="ultralytics device: None=auto, '0' for first GPU, 'cpu' to force CPU",
     )
@@ -158,6 +164,7 @@ def main(argv: list[str] | None = None) -> int:
         epochs=args.epochs,
         imgsz=args.imgsz,
         batch=args.batch,
+        workers=args.workers,
         device=args.device,
         run_name=args.name,
     )

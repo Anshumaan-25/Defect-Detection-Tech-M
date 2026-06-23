@@ -5,6 +5,8 @@
 data/raw/
 data/processed/
 models/yolo/*.pt
+# YOLO training run dirs (force-add a best.pt with `git add -f` to version one)
+models/yolo/*/
 models/anomaly/
 *.ckpt
 
