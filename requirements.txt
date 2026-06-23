@@ -45,8 +45,6 @@ Pillow>=10.2.0
 PyYAML>=6.0.1               # dataset registry / pipeline configs
 python-dotenv>=1.0.1        # load API keys from a local .env file
 
-# --- Demo app (future: Streamlit / Gradio wrapper) ------------------------
-# Kept here so the inference UI stays a one-line install away. Uncomment when
-# you build the demo; left commented to keep the training image lean.
-# streamlit>=1.34.0
-# gradio>=4.31.0
+# --- Demo app (Gradio web UI — app.py) ------------------------------------
+gradio>=6.0                 # web demo wrapping DefectInspector (run: python app.py)
+# streamlit>=1.34.0         # alternative UI, not used

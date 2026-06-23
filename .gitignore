@@ -31,6 +31,9 @@ wandb/
 result_*.png
 demo_output_*.png
 
+# --- Gradio runtime cache --------------------------------------------------
+.gradio/
+
 # --- OS / editor -----------------------------------------------------------
 .DS_Store
 .vscode/
