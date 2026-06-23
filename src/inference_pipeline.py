@@ -1,29 +1,34 @@
-"""inference_pipeline.py — unified defect inspection: object detection + surface anomaly.
+"""inference_pipeline.py — unified defect inspection: detection + anomaly + OCR.
 
-Takes a single product image and runs it through two models in parallel:
+Takes a single product image and runs it through three independent detectors:
 
   * YOLO (ultralytics)     — object detection: flags missing components / damaged packaging
   * PatchCore (anomalib)   — surface defect anomaly detection via memory-bank comparison
+  * EasyOCR                — reads label text and (optionally) verifies it against an
+                             expected value, to catch wrong / mislabelled products
 
-Both models are loaded once in __init__ and reused across calls, so the typical
+All models are loaded once in __init__ and reused across calls, so the typical
 pattern is to create one DefectInspector per process and call .inspect() in a loop.
+Each detector runs independently — a failure in one is recorded in ``errors`` and
+never aborts the others.
 
 Device placement is explicit: pass device="auto" to let the code pick GPU when
-available, or "cpu" / "0" (CUDA index) to force a specific device. Both models
-are sent to the same device; mixed-device setups are not supported.
+available, or "cpu" / "0" (CUDA index) to force a specific device. All models are
+sent to the same device; mixed-device setups are not supported.
 
 Usage
 -----
     from src.inference_pipeline import DefectInspector
 
     inspector = DefectInspector(device="auto")
-    result = inspector.inspect("path/to/image.jpg")
-    print(result["anomaly_score"], result["detections"])
+    result = inspector.inspect("path/to/image.jpg", expected_text="LOT-4471")
+    print(result["anomaly_score"], result["detections"], result["ocr"])
 
 CLI quick-test::
 
     python -m src.inference_pipeline path/to/image.jpg --device auto
-    python -m src.inference_pipeline path/to/image.jpg --device 0 --verbose
+    python -m src.inference_pipeline label.jpg --expected-text "LOT-4471"
+    python -m src.inference_pipeline path/to/image.jpg --no-ocr --device 0 --verbose
 """
 
 from __future__ import annotations
@@ -112,6 +117,26 @@ def _anomalib_device_str(torch_device: str) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Label-text comparison (wrong-label detection)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _normalize_text(s: str) -> str:
+    """Lower-case and strip everything but letters/digits for robust comparison.
+
+    OCR output is noisy (stray punctuation, spaces, case), so we compare on the
+    alphanumeric core only: "LOT-4471 " and "lot 4471" both become "lot4471".
+    """
+    import re
+    return re.sub(r"[^a-z0-9]", "", s.lower())
+
+
+def _compare_label(expected: str, full_text: str) -> bool:
+    """True if the expected label is found within the OCR'd text (normalised)."""
+    exp = _normalize_text(expected)
+    return bool(exp) and exp in _normalize_text(full_text)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Result schema
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -124,6 +149,8 @@ def _empty_result(device: str) -> dict[str, Any]:
         "anomaly_score": None,   # float — higher means more anomalous
         "anomaly_map": None,     # np.ndarray (H, W) float32 — pixel-level heatmap
         "is_anomalous": None,    # bool — True if score exceeds threshold
+        # EasyOCR outputs (None when OCR is disabled)
+        "ocr": None,             # dict: text_found / full_text / expected / label_ok
         # Any non-fatal per-model errors are collected here instead of raising
         "errors": [],
     }
@@ -149,6 +176,12 @@ class DefectInspector:
     anomaly_threshold : float, optional
         Override the image-level score threshold for the is_anomalous flag.
         When None, uses the threshold baked into the exported model by anomalib.
+    enable_ocr : bool, optional
+        Load the EasyOCR reader for label-text extraction (default: True). Set
+        False to skip it — saves the (one-time) model download + load when you
+        only need the detection/anomaly paths.
+    ocr_languages : list[str], optional
+        Languages for EasyOCR (default: ["en"]).
     """
 
     def __init__(
@@ -157,6 +190,8 @@ class DefectInspector:
         yolo_weights: str | Path | None = None,
         device: str | None = "auto",
         anomaly_threshold: float | None = None,
+        enable_ocr: bool = True,
+        ocr_languages: list[str] | None = None,
     ) -> None:
         self.device = _resolve_device(device)
         self._anomaly_threshold = anomaly_threshold
@@ -164,6 +199,7 @@ class DefectInspector:
 
         self._yolo = self._load_yolo(yolo_weights)
         self._anomaly_inferencer = self._load_patchcore(anomaly_run_dir)
+        self._ocr_reader = self._load_ocr(ocr_languages) if enable_ocr else None
 
     # ─────────────────────────────────────────────────────────────────────────
     # Loaders
@@ -206,11 +242,25 @@ class DefectInspector:
             device=_anomalib_device_str(self.device),
         )
 
+    def _load_ocr(self, languages: list[str] | None):
+        import easyocr
+
+        langs = languages or ["en"]
+        use_gpu = self.device.startswith("cuda")
+        logger.info("Loading EasyOCR reader (languages=%s, gpu=%s)…", langs, use_gpu)
+        # First call downloads the detection+recognition models (~64MB) to the
+        # EasyOCR cache; subsequent loads are fast.
+        return easyocr.Reader(langs, gpu=use_gpu)
+
     # ─────────────────────────────────────────────────────────────────────────
     # Public API
     # ─────────────────────────────────────────────────────────────────────────
 
-    def inspect(self, image: str | Path | np.ndarray | Image.Image) -> dict[str, Any]:
+    def inspect(
+        self,
+        image: str | Path | np.ndarray | Image.Image,
+        expected_text: str | None = None,
+    ) -> dict[str, Any]:
         """Run the full defect inspection pipeline on a single image.
 
         Parameters
@@ -218,6 +268,11 @@ class DefectInspector:
         image : str | Path | np.ndarray | PIL.Image
             Input image. File paths are loaded automatically. NumPy arrays must be
             HWC uint8 RGB (or float32 [0, 1] — scaled automatically).
+        expected_text : str, optional
+            The label text the product *should* carry. When given (and OCR is
+            enabled), the result's ``ocr.label_ok`` flags whether it was found —
+            i.e. wrong-label detection. When None, OCR still reads any text but
+            ``label_ok`` stays None (nothing to compare against).
 
         Returns
         -------
@@ -227,12 +282,13 @@ class DefectInspector:
             anomaly_score : float          — image-level score (higher = more anomalous)
             anomaly_map   : np.ndarray     — pixel heatmap, shape (H, W), float32
             is_anomalous  : bool           — True if score exceeds the threshold
+            ocr           : dict | None    — text_found / full_text / expected / label_ok
             errors        : list[str]      — non-fatal per-model error messages, if any
         """
         result = _empty_result(self.device)
         pil_image = _to_pil(image)
 
-        # Each model runs independently — a failure in one doesn't abort the other.
+        # Each model runs independently — a failure in one doesn't abort the others.
         try:
             result["detections"] = self._run_yolo(pil_image)
         except Exception as exc:
@@ -249,6 +305,14 @@ class DefectInspector:
             msg = f"Anomaly detection failed: {exc}"
             logger.warning(msg)
             result["errors"].append(msg)
+
+        if self._ocr_reader is not None:
+            try:
+                result["ocr"] = self._run_ocr(pil_image, expected_text)
+            except Exception as exc:
+                msg = f"OCR failed: {exc}"
+                logger.warning(msg)
+                result["errors"].append(msg)
 
         return result
 
@@ -294,6 +358,44 @@ class DefectInspector:
             is_anomalous = bool(int(batch.pred_label))
 
         return score, amap, is_anomalous
+
+    def _run_ocr(
+        self, image: Image.Image, expected_text: str | None, min_conf: float = 0.3
+    ) -> dict[str, Any]:
+        """Read label text with EasyOCR and (optionally) compare to expected.
+
+        Returns a dict::
+
+            {
+              "text_found": ["LOT-4471", "EXP 2026-06"],   # confident reads
+              "full_text":  "LOT-4471 EXP 2026-06",        # joined
+              "items":      [{"text": ..., "confidence": ...}, ...],
+              "expected":   "LOT-4471" | None,
+              "label_ok":   True | False | None,           # None if no expected_text
+            }
+        """
+        # EasyOCR takes an RGB numpy array; returns (bbox, text, confidence) tuples.
+        raw = self._ocr_reader.readtext(np.array(image))
+
+        items = [
+            {"text": text, "confidence": round(float(conf), 4)}
+            for (_box, text, conf) in raw
+            if float(conf) >= min_conf
+        ]
+        text_found = [it["text"] for it in items]
+        full_text = " ".join(text_found)
+
+        label_ok: bool | None = None
+        if expected_text:
+            label_ok = _compare_label(expected_text, full_text)
+
+        return {
+            "text_found": text_found,
+            "full_text": full_text,
+            "items": items,
+            "expected": expected_text,
+            "label_ok": label_ok,
+        }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -354,6 +456,11 @@ def main(argv: list[str] | None = None) -> int:
         "--threshold", type=float, default=None,
         help="Override anomaly score threshold for the is_anomalous flag",
     )
+    parser.add_argument(
+        "--expected-text", default=None,
+        help="Expected label text; sets ocr.label_ok for wrong-label detection",
+    )
+    parser.add_argument("--no-ocr", action="store_true", help="Skip the OCR detector")
     parser.add_argument("--verbose", "-v", action="store_true")
     args = parser.parse_args(argv)
 
@@ -368,8 +475,9 @@ def main(argv: list[str] | None = None) -> int:
         yolo_weights=args.yolo_weights,
         device=args.device,
         anomaly_threshold=args.threshold,
+        enable_ocr=not args.no_ocr,
     )
-    result = inspector.inspect(args.image)
+    result = inspector.inspect(args.image, expected_text=args.expected_text)
 
     # Swap the heatmap array for its shape so the JSON stays readable
     printable = {

@@ -64,7 +64,8 @@ see the note in `configs/datasets.yaml`.
 ## Roadmap
 
 - [x] Project scaffold + dataset loader
-- [ ] `train_yolo.py` — Colab training entry point
-- [ ] Anomaly training (anomalib / PatchCore on MVTec AD)
-- [ ] `inference_pipeline.py` — combine all four detectors behind one API
+- [x] Anomaly training (anomalib / PatchCore on MVTec AD) — image AUROC 0.9946
+- [x] `train_yolo.py` — trained on PCB defects — mAP50 0.978
+- [x] `inference_pipeline.py` — all four checks behind one API (YOLO + PatchCore + OCR)
+- [x] Demo tools — `inspect_image.py` (anomaly panel), `demo_yolo.py` (PCB boxes)
 - [ ] Streamlit / Gradio demo app

@@ -252,6 +252,7 @@ def main(argv: list[str] | None = None) -> int:
         yolo_weights=args.yolo_weights,
         device=args.device,
         anomaly_threshold=args.threshold,
+        enable_ocr=False,  # this panel visualises anomaly + YOLO only
     )
 
     print("  [2/3] Running inference...")

@@ -14,8 +14,10 @@ This file is the canonical engineering narrative for the Defect Detection projec
 4. [Hardware Migration & CUDA Fix](#4-hardware-migration--cuda-fix)
 5. [Anomaly Detection Training (PatchCore)](#5-anomaly-detection-training-patchcore)
 6. [Unified Inference Engine](#6-unified-inference-engine)
-7. [Current Project State](#7-current-project-state)
-8. [Roadmap](#8-roadmap)
+7. [Object Detection Training (YOLO)](#7-object-detection-training-yolo)
+8. [Wrong-Label Detection (OCR)](#8-wrong-label-detection-ocr)
+9. [Current Project State](#9-current-project-state)
+10. [Roadmap](#10-roadmap)
 
 ---
 
@@ -351,7 +353,93 @@ python -m src.inference_pipeline path/to/image.jpg --threshold 0.5
 
 ---
 
-## 7. Current Project State
+## 7. Object Detection Training (YOLO)
+
+*(Session of 2026-06-23.)*
+
+### The dataset
+
+With a Roboflow API key in `.env`, `dataset_loader.py` pulled the **PCB Defect Detection (Ultra)** dataset from Roboflow Universe (`cnn-pcb-defect-detection/pcb-defect-detection-ultra`, auto-resolved by our `"latest"` logic to v6). It arrives in YOLOv8 format with the split layout ultralytics consumes directly:
+
+- **6 defect classes:** Missing_Hole, MouseBite, Open_Circuit, Short_Circuit, Spur, Spurious_Cooper
+- **6,333 train / 1,778 val / 903 test** images, each split carrying a `data.yaml`
+
+### The training journey (three failures before success)
+
+Getting a clean run on the 4GB laptop GPU took three diagnosed failures — each worth recording for the next session:
+
+**1. GPU vanished mid-session (power management).** The first launch failed with `torch.cuda.is_available(): False` and `nvidia-smi` returning a *permissions* error — even though CUDA had worked earlier the same day. Root cause: the laptop dropped to low battery and **NVIDIA Optimus disabled the discrete GPU to save power**. Fix: back on AC power the RTX 3050 reappeared. Lesson — keep the laptop plugged in for any GPU run.
+
+**2. OpenBLAS RAM exhaustion from stacked workers.** The next run died with `OpenBLAS: Memory allocation still failed after 10 retries`. This is *system RAM*, not VRAM. The cause was **leftover DataLoader worker processes**: the earlier failed runs never cleaned up their 8 workers each, so 16+ zombie `python.exe` processes (~500MB apiece) were simultaneously holding image data on the 16GB machine. Fix: killed the stale processes to reclaim RAM, and **added a configurable `--workers` flag** to `train_yolo.py` (it was hardcoded to ultralytics' default of 8). Re-running with fewer workers trained cleanly.
+
+**3. AutoBatch was too conservative.** Asked to use more of the idle GPU, we tried `--batch -1` (ultralytics AutoBatch). It chose only **batch 5** (targeting 60% VRAM, estimating 1.88GB needed). But our own ground truth from the earlier run showed actual steady-state training used just **0.55GB at batch 4** — AutoBatch's profiler over-estimates peak memory on small cards. We overrode it with an explicit, known-safe `--batch 16`.
+
+### A note on GPU utilisation
+
+A recurring question this session: *"why isn't the GPU at 100%?"* Two reasons. (a) `yolov8n` is a **nano** model (3M params, 8 GFLOPs) — it finishes a batch faster than the CPU can prepare the next one, so the GPU idles between batches. (b) The workload is **data-pipeline-bound** — throughput is capped by how fast the DataLoader workers read+augment JPEGs, not by GPU compute. A bigger batch improves per-step efficiency but cannot exceed the data-loading ceiling. The genuine way to saturate the GPU is a **bigger model** (`yolov8s/m`), which is the right call for the real training run (and also improves accuracy).
+
+### Results
+
+Final config: `yolov8n`, 5 epochs, batch 16, imgsz 640, workers 8, device 0. **Trained in ~12.4 minutes**, peak VRAM ~1.5GB.
+
+| Class | Precision | Recall | mAP50 | mAP50-95 |
+|---|---|---|---|---|
+| **all** | **0.966** | **0.945** | **0.978** | **0.672** |
+| Missing_Hole | 0.993 | 0.985 | 0.994 | 0.771 |
+| MouseBite | 0.970 | 0.927 | 0.977 | 0.605 |
+| Open_Circuit | 0.947 | 0.947 | 0.977 | 0.618 |
+| Short_Circuit | 0.979 | 0.960 | 0.984 | 0.686 |
+| Spur | 0.961 | 0.925 | 0.966 | 0.702 |
+| Spurious_Cooper | 0.947 | 0.923 | 0.971 | 0.650 |
+
+Inference speed: **4.3 ms/image**.
+
+**Honest caveat:** mAP50 of 0.978 after only 5 epochs indicates a relatively clean dataset (train/val likely share visual style). The stricter **mAP50-95 (0.672)** is the number a longer run would mainly improve, by tightening box localisation. This is a real, working detector — but for any production claim it should be retrained for more epochs (ideally `yolov8s` on Colab) and evaluated on held-out, visually distinct data.
+
+### Artifacts
+
+- **Trained weights:** `models/yolo/pcb_defects_yolo/weights/best.pt` (6.2MB, force-added to git; the rest of the run dir — `last.pt`, plots, train/val mosaics — is gitignored for consistency with `models/anomaly/`).
+- **Demo:** `demo_yolo.py` runs `best.pt` on a PCB image, draws the predicted boxes via ultralytics' `result.plot()`, and saves an annotated PNG. Verified on a `missing_hole` test image — a clean "Missing_Hole 0.82" box landed exactly on the absent hole.
+
+---
+
+## 8. Wrong-Label Detection (OCR)
+
+The fourth and final defect class — wrong / mislabelled products — needs **no training**. EasyOCR ships pre-trained detection + recognition models, so the task is purely *integration*: read the label text, compare it to what it should say.
+
+### Integration into `DefectInspector`
+
+OCR became the third detector behind the unified `inspect()` API:
+
+- **`enable_ocr=True`** (constructor flag) loads an `easyocr.Reader(["en"], gpu=…)` once. The `gpu` flag is derived from the resolved device (True for any `cuda*`). The first load downloads ~64MB of models to the EasyOCR cache.
+- **`inspect(image, expected_text=…)`** gained an optional `expected_text` argument. EasyOCR reads all text via `readtext(np.array(image))`; reads below `min_conf=0.3` are dropped.
+- The result dict gained an **`ocr`** block:
+  ```python
+  "ocr": {
+    "text_found": ["LOT-4471", "EXP: 2026-06"],
+    "full_text":  "LOT-4471 EXP: 2026-06",
+    "items":      [{"text": ..., "confidence": ...}, ...],
+    "expected":   "LOT-4471" | None,
+    "label_ok":   True | False | None,   # None when no expected_text given
+  }
+  ```
+
+### The comparison logic
+
+OCR output is noisy (case, spacing, stray punctuation), so the match is done on a normalised alphanumeric core: `_normalize_text()` lower-cases and strips everything but letters/digits (`"LOT-4471 "` → `"lot4471"`). `_compare_label()` returns True if the normalised expected string is a substring of the normalised OCR text — tolerant of extra text printed around the label. `label_ok=False` means **wrong label detected**.
+
+Like the other detectors, OCR runs in its own try/except — a failure lands in `errors` and never aborts the anomaly/detection paths. `inspect_image.py` (the surface-defect visual demo) passes `enable_ocr=False` so it doesn't pay the OCR load cost it doesn't use.
+
+### Validation
+
+Tested on a synthetic product label rendered with PIL (`"LOT-4471"`, `"EXP: 2026-06"`):
+
+- **Correct expected** (`"LOT-4471"`): EasyOCR read `['LOT-4471', 'EXP: 2026-06']`; `label_ok = True`. ✅
+- **Wrong expected** (`"LOT-9999"`): `label_ok = False` — wrong label correctly flagged. ✅
+
+---
+
+## 9. Current Project State
 
 ### What Is Complete
 
@@ -363,41 +451,46 @@ python -m src.inference_pipeline path/to/image.jpg --threshold 0.5
 | MVTec AD extraction | ✅ Complete | `metal_nut` category fully extracted and verified |
 | `src/train_anomaly.py` | ✅ Complete | PatchCore/ResNet18 on MVTec AD; CLI; export |
 | PatchCore training | ✅ Complete | Image AUROC 0.9946 on metal_nut |
-| `src/inference_pipeline.py` | ✅ Complete | `DefectInspector` class; validated on good/bent images |
-| `src/train_yolo.py` | ⏸ Scaffolded | Training deferred; `yolov8n.pt` base weights are on disk |
+| `src/inference_pipeline.py` | ✅ Complete | `DefectInspector` unifies YOLO + PatchCore + OCR; validated |
+| `src/train_yolo.py` | ✅ Complete | Configurable `--workers`; trained on PCB defects |
+| YOLO training | ✅ Complete | yolov8n, mAP50 0.978 across 6 PCB defect classes |
+| OCR / wrong-label path | ✅ Complete | EasyOCR wired into `DefectInspector`; logic validated |
+| Demo tools | ✅ Complete | `inspect_image.py` (anomaly panel) + `demo_yolo.py` (PCB boxes) |
 
 ### What Is Not Yet Built
 
 | Component | Priority | Notes |
 |---|---|---|
-| YOLO training on PCB dataset | Medium | Roboflow dataset configured; training deferred |
-| OCR label-check pipeline | Medium | EasyOCR integration planned; no custom training needed |
-| `inference_pipeline.py` OCR path | Medium | `DefectInspector` has slots for it; not yet wired |
 | Streamlit / Gradio demo UI | High | Final deliverable; wraps `DefectInspector.inspect()` |
+| Longer / bigger YOLO retrain | Medium | `yolov8s`, more epochs on Colab to lift mAP50-95 + generalisation |
 | Google Colab training notebook | Medium | Scale-up path for YOLO + larger PatchCore backbone |
-| Inference visualisation | Low | Overlay `anomaly_map` on image; save annotated output |
+| More MVTec categories | Low | Only `metal_nut` trained; loader/trainer support all 15 |
+| OCR on real label photos | Low | Validated on synthetic label; needs real product-label samples |
 
 ### Key File Locations
 
 - **Trained PatchCore model:** `models/anomaly/mvtec_ad_metal_nut_patchcore/weights/torch/model.pt`
+- **Trained YOLO model:** `models/yolo/pcb_defects_yolo/weights/best.pt`
 - **Base YOLO weights:** `yolov8n.pt` (project root)
 - **MVTec AD data:** `data/raw/anomaly/mvtec_ad/metal_nut/`
+- **PCB data:** `data/raw/yolo/pcb_defects/`
 - **Dataset registry:** `configs/datasets.yaml`
+- **Demo tools:** `inspect_image.py` (anomaly panel), `demo_yolo.py` (PCB boxes)
 
 ---
 
-## 8. Roadmap
+## 10. Roadmap
 
 ### Next Session
 
-1. **YOLO training** — run `python -m src.train_yolo` on the PCB defects dataset (already downloaded via Roboflow). Evaluate mAP on the test split.
-2. **OCR pipeline** — integrate EasyOCR into `inference_pipeline.py` as a third detection path in `DefectInspector.inspect()`.
-3. **Visualisation helper** — write a utility to overlay `anomaly_map` (heatmap) on the original image and draw YOLO bounding boxes, for demo purposes.
+1. **Gradio / Streamlit demo** — wrap `DefectInspector` in an image-upload UI that shows all four results (detections, anomaly heatmap, OCR/label check) in one view. The final deliverable; deployable to Hugging Face Spaces.
+2. **Colab notebook** — clone the repo, install deps, and run the full train + evaluate pipeline on a real GPU, free of the 4GB / Optimus constraints hit this session.
+3. **Stronger YOLO** — retrain with `yolov8s` and more epochs to lift mAP50-95 and generalisation (this is also the path to genuinely saturating the GPU).
 
 ### Medium Term
 
-4. **Gradio demo** — wrap `DefectInspector` in a Gradio `Interface` with an image upload widget. One Python file, deployable to Hugging Face Spaces.
-5. **Colab notebook** — a single notebook that clones the repo, installs dependencies, mounts Google Drive for the MVTec archive, and runs the full train + evaluate pipeline with the larger backbone.
+4. **OCR on real labels** — validate the wrong-label path on actual product-label photos (currently proven on a synthetic label).
+5. **More MVTec categories** — the loader + trainer already support all 15; train more once the archives are provided.
 
 ### Scaling Considerations
 
