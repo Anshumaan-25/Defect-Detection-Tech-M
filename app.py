@@ -114,11 +114,6 @@ def _label_view(pil, result, expected_text, err):
     return pil, verdict, (details + (f"  \n\n{err}" if err else ""))
 
 
-# ── Show the expected-text box only in Label mode ────────────────────────────
-def _toggle_expected(mode):
-    return gr.update(visible=(mode == MODE_LABEL))
-
-
 # ── Example images (only those that exist on disk) ───────────────────────────
 def _examples():
     candidates = [
@@ -131,6 +126,10 @@ def _examples():
                       if p.suffix.lower() in {".jpg", ".jpeg", ".png"}), None)
         if first:
             candidates.append([MODE_PCB, str(first), ""])
+    # Label-check examples: real PCB board marking (verify "ELEC-1") +
+    # synthetic product label (verify "LOT-4471"). One click loads image+expected.
+    candidates.append([MODE_LABEL, "samples/OCR_test-E3330BM.jpg", "ELEC-1"])
+    candidates.append([MODE_LABEL, "samples/sample_label.png", "LOT-4471"])
     return [c for c in candidates if Path(c[1]).exists()]
 
 
@@ -147,8 +146,8 @@ def build_ui() -> gr.Blocks:
                 mode = gr.Radio(MODES, value=MODE_SURFACE, label="Inspection mode")
                 image = gr.Image(label="Upload image", type="pil", height=300)
                 expected = gr.Textbox(
-                    label="Expected label text", placeholder="e.g. LOT-4471",
-                    visible=False,
+                    label="Expected label text (used in Label check mode)",
+                    placeholder="e.g. ELEC-1",
                 )
                 btn = gr.Button("Inspect", variant="primary")
             with gr.Column(scale=1):
@@ -161,7 +160,6 @@ def build_ui() -> gr.Blocks:
             gr.Examples(examples=examples, inputs=[mode, image, expected],
                         label="Example images")
 
-        mode.change(_toggle_expected, mode, expected)
         btn.click(inspect, [mode, image, expected], [out_img, out_verdict, out_details])
 
     return demo
