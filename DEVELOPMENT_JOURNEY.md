@@ -416,26 +416,28 @@ OCR became the third detector behind the unified `inspect()` API:
 - The result dict gained an **`ocr`** block:
   ```python
   "ocr": {
-    "text_found": ["LOT-4471", "EXP: 2026-06"],
-    "full_text":  "LOT-4471 EXP: 2026-06",
+    "text_found": ["ELEC-1", "E36", "E49"],
+    "full_text":  "ELEC-1 E36 E49",
     "items":      [{"text": ..., "confidence": ...}, ...],
-    "expected":   "LOT-4471" | None,
+    "expected":   "ELEC-1" | None,
     "label_ok":   True | False | None,   # None when no expected_text given
   }
   ```
 
 ### The comparison logic
 
-OCR output is noisy (case, spacing, stray punctuation), so the match is done on a normalised alphanumeric core: `_normalize_text()` lower-cases and strips everything but letters/digits (`"LOT-4471 "` → `"lot4471"`). `_compare_label()` returns True if the normalised expected string is a substring of the normalised OCR text — tolerant of extra text printed around the label. `label_ok=False` means **wrong label detected**.
+OCR output is noisy (case, spacing, stray punctuation), so the match is done on a normalised alphanumeric core: `_normalize_text()` lower-cases and strips everything but letters/digits (`"ELEC-1 "` → `"elec1"`). `_compare_label()` returns True if the normalised expected string is a substring of the normalised OCR text — tolerant of extra text printed around the label. `label_ok=False` means **wrong label detected**.
 
 Like the other detectors, OCR runs in its own try/except — a failure lands in `errors` and never aborts the anomaly/detection paths. `inspect_image.py` (the surface-defect visual demo) passes `enable_ocr=False` so it doesn't pay the OCR load cost it doesn't use.
 
 ### Validation
 
-Tested on a synthetic product label rendered with PIL (`"LOT-4471"`, `"EXP: 2026-06"`):
+Validated on a **real PCB photo** (`samples/OCR_test-E3330BM.jpg`) by verifying the board's printed model marking:
 
-- **Correct expected** (`"LOT-4471"`): EasyOCR read `['LOT-4471', 'EXP: 2026-06']`; `label_ok = True`. ✅
-- **Wrong expected** (`"LOT-9999"`): `label_ok = False` — wrong label correctly flagged. ✅
+- **Correct expected** (`"ELEC-1"`): EasyOCR reads `ELEC-1` (with other board text); `label_ok = True`. ✅
+- **Wrong expected** (`"ELEC-2"`): `label_ok = False` — wrong label correctly flagged. ✅
+
+**Honest finding:** the board's *etched batch code* `E3330BM` is **misread** (e.g. as `EjJJ0BM`) because the stylized, low-contrast silkscreen font confuses characters (3↔J) — crop/contrast/upscale preprocessing did not fix it. So the demo verifies the clean printed marking `ELEC-1`, not the etched batch code. This is a real, well-known OCR limitation: reliable on printed labels, weaker on small etched markings.
 
 ---
 
@@ -465,7 +467,7 @@ Tested on a synthetic product label rendered with PIL (`"LOT-4471"`, `"EXP: 2026
 | Longer / bigger YOLO retrain | Medium | `yolov8s`, more epochs on Colab to lift mAP50-95 + generalisation |
 | Google Colab training notebook | Medium | Scale-up path for YOLO + larger PatchCore backbone |
 | More MVTec categories | Low | Only `metal_nut` trained; loader/trainer support all 15 |
-| OCR on real label photos | Low | Validated on synthetic label; needs real product-label samples |
+| OCR on etched/varied labels | Low | Works on printed markings (ELEC-1); etched silkscreen (E3330BM) misreads |
 
 ### Key File Locations
 
@@ -489,7 +491,7 @@ Tested on a synthetic product label rendered with PIL (`"LOT-4471"`, `"EXP: 2026
 
 ### Medium Term
 
-4. **OCR on real labels** — validate the wrong-label path on actual product-label photos (currently proven on a synthetic label).
+4. **OCR robustness** — improve reading of low-contrast / etched markings (e.g. preprocessing or higher-res capture); currently reliable on clean printed labels like `ELEC-1`.
 5. **More MVTec categories** — the loader + trainer already support all 15; train more once the archives are provided.
 
 ### Scaling Considerations

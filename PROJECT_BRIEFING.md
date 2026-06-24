@@ -34,7 +34,7 @@ A complete reference for understanding and explaining the pipeline (e.g. in a re
 - **6,333 train / 1,778 validation / 903 test** images.
 - **6 defect classes:** Missing_Hole, MouseBite, Open_Circuit, Short_Circuit, Spur, Spurious_Cooper *("Cooper" is the dataset's own spelling of "Copper").*
 
-**C) OCR** — *no dataset.* EasyOCR ships pre-trained; the wrong-label logic was validated on a synthetic label image (`samples/sample_label.png`).
+**C) OCR** — *no dataset.* EasyOCR ships pre-trained; the wrong-label logic was validated on a real PCB image (`samples/OCR_test-E3330BM.jpg`) by verifying the board's printed model marking `ELEC-1`.
 
 ## 4. Tools & tech stack
 

@@ -31,10 +31,11 @@ Each mode has built-in **Example** thumbnails (click to load), or upload your ow
 - Click the **PCB** example → **Inspect** → bounding boxes with class + confidence (e.g. *Missing_Hole 0.82*).
 - **Say:** *"A YOLOv8 detector trained on 6 PCB defect types — 0.978 mAP50."*
 
-### 3. Label check (OCR)
-- Upload **`samples/sample_label.png`**, type expected text **`LOT-4471`** → **Inspect** → 🟢 **LABEL OK**.
-- Change expected text to **`LOT-9999`** → **Inspect** → 🔴 **WRONG LABEL**.
-- **Say:** *"EasyOCR reads the label and verifies it against the expected value — no training needed."*
+### 3. Label check (OCR) — real-world example
+- Click the **real PCB** example (loads `samples/OCR_test-E3330BM.jpg` with expected **`ELEC-1`** pre-filled) → **Inspect** → 🟢 **LABEL OK**.
+- Change expected text to **`ELEC-2`** → **Inspect** → 🔴 **WRONG LABEL**.
+- **Say:** *"EasyOCR reads the board's model marking and verifies it against the expected value — no training needed."*
+- ⚠️ Use **`ELEC-1`** (the clean printed marking). Do **not** use the etched batch code `E3330BM` — OCR misreads its stylized font.
 
 ## 📊 Headline numbers
 

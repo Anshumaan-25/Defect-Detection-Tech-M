@@ -126,10 +126,9 @@ def _examples():
                       if p.suffix.lower() in {".jpg", ".jpeg", ".png"}), None)
         if first:
             candidates.append([MODE_PCB, str(first), ""])
-    # Label-check examples: real PCB board marking (verify "ELEC-1") +
-    # synthetic product label (verify "LOT-4471"). One click loads image+expected.
+    # Label-check example: real PCB board marking (verify "ELEC-1").
+    # One click loads image + expected text.
     candidates.append([MODE_LABEL, "samples/OCR_test-E3330BM.jpg", "ELEC-1"])
-    candidates.append([MODE_LABEL, "samples/sample_label.png", "LOT-4471"])
     return [c for c in candidates if Path(c[1]).exists()]
 
 

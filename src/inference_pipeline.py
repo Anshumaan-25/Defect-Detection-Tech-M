@@ -21,13 +21,13 @@ Usage
     from src.inference_pipeline import DefectInspector
 
     inspector = DefectInspector(device="auto")
-    result = inspector.inspect("path/to/image.jpg", expected_text="LOT-4471")
+    result = inspector.inspect("path/to/image.jpg", expected_text="ELEC-1")
     print(result["anomaly_score"], result["detections"], result["ocr"])
 
 CLI quick-test::
 
     python -m src.inference_pipeline path/to/image.jpg --device auto
-    python -m src.inference_pipeline label.jpg --expected-text "LOT-4471"
+    python -m src.inference_pipeline label.jpg --expected-text "ELEC-1"
     python -m src.inference_pipeline path/to/image.jpg --no-ocr --device 0 --verbose
 """
 
@@ -124,7 +124,7 @@ def _normalize_text(s: str) -> str:
     """Lower-case and strip everything but letters/digits for robust comparison.
 
     OCR output is noisy (stray punctuation, spaces, case), so we compare on the
-    alphanumeric core only: "LOT-4471 " and "lot 4471" both become "lot4471".
+    alphanumeric core only: "ELEC-1 " and "elec 1" both become "elec1".
     """
     import re
     return re.sub(r"[^a-z0-9]", "", s.lower())
@@ -367,10 +367,10 @@ class DefectInspector:
         Returns a dict::
 
             {
-              "text_found": ["LOT-4471", "EXP 2026-06"],   # confident reads
-              "full_text":  "LOT-4471 EXP 2026-06",        # joined
+              "text_found": ["ELEC-1", "E36"],             # confident reads
+              "full_text":  "ELEC-1 E36",                  # joined
               "items":      [{"text": ..., "confidence": ...}, ...],
-              "expected":   "LOT-4471" | None,
+              "expected":   "ELEC-1" | None,
               "label_ok":   True | False | None,           # None if no expected_text
             }
         """
