@@ -467,9 +467,8 @@ Validated on a **real PCB photo** (`samples/OCR_test-E3330BM.jpg`) by verifying 
 
 | Component | Priority | Notes |
 |---|---|---|
-| Longer / bigger YOLO retrain | Medium | `yolov8s`, more epochs on Colab to lift mAP50-95 + generalisation (both PCB and packaging) |
-| Google Colab training notebook | Medium | Scale-up path for YOLO + larger PatchCore backbone |
-| More MVTec categories | Low | Only `metal_nut` trained; loader/trainer support all 15; **blocked** — license-gated, needs another archive from the user |
+| Longer / bigger YOLO retrain | Medium | Notebook ready (`notebooks/colab_training.ipynb`); **awaiting user to run it** on Colab |
+| More MVTec categories | Low | Only `metal_nut` trained; notebook ready to consume more; **blocked** — license-gated, needs another archive from the user |
 | OCR on etched/varied labels | Low | Works on printed markings (ELEC-1); etched silkscreen (E3330BM) misreads |
 | Batch/report mode + public deployment | Medium | Phase 2 final step (§11) — folder-of-images CSV/PDF report + Hugging Face Spaces |
 
@@ -484,6 +483,7 @@ Validated on a **real PCB photo** (`samples/OCR_test-E3330BM.jpg`) by verifying 
 - **Packaging data:** `data/raw/yolo/packaging_damage/`
 - **Dataset registry:** `configs/datasets.yaml`
 - **Demo tools:** `inspect_image.py` (anomaly panel), `demo_yolo.py` (PCB boxes), `app.py` (full Gradio UI, all 4 modes)
+- **Colab retraining notebook:** `notebooks/colab_training.ipynb` (YOLO scale-up + PatchCore scale-up/more categories — ready to run, not yet executed)
 
 ---
 
@@ -568,3 +568,20 @@ This is deliberately minimal — no plugin registry, no dict-of-models abstracti
 **In `app.py`:** a new `MODE_PACKAGING` mode was added alongside the existing three. The existing `_pcb_view()` renderer (boxes + class/confidence table) is fully generic over `result["detections"]`, so it's reused as-is for packaging — no new view function needed. The mode dispatch in the `inspect()` callback picks `yolo_variant="packaging"` when `mode == MODE_PACKAGING`, otherwise `"pcb"`. An example image was chosen by scanning the whole test set for the highest-confidence `defected` prediction (found at conf 0.89) rather than picking arbitrarily — same principle as the PCB "Missing_Hole" example from Phase 1.
 
 Verified end-to-end through the running app (not just unit-level): packaging image → 1 defect detected; PCB image → unchanged regression check still passes (confirming the two-model routing doesn't cross-contaminate).
+
+### 11.4 Colab Retraining Notebook
+
+With all four detectors trained locally at smoke-test scale, the next Phase 2 item is retraining with bigger models/longer schedules on Colab's free GPU. This is split cleanly by what's actually executable from here versus what needs the user's own hands:
+
+- **Preparing the notebook** — fully within scope; done in this session.
+- **Actually running it** — needs the user's own Google account and an interactive Colab session in their browser. This is *not* something that can be driven headlessly/autonomously (no credentials, and a multi-epoch training run isn't a sensible thing to babysit via browser automation). So this task's honest completion state is: **notebook ready, execution pending on the user.**
+
+Built `notebooks/colab_training.ipynb` as a single notebook covering both remaining Colab-shaped Phase 2 items at once (rather than two notebooks that would each repeat the same clone/install/mount overhead):
+
+- **Setup** — clone the repo from GitHub, `pip install -r requirements.txt` (Colab's own CUDA-enabled torch already satisfies the `torch>=2.2.0` pin, so it's left untouched — no repeat of the CPU/CUDA wheel confusion from Phase 1).
+- **Secrets** — a placeholder cell for the Roboflow API key, with an explicit warning not to commit a real key after filling it in.
+- **Part 1 (YOLO)** — retrains both `pcb_defects` and `packaging_damage` with `yolov8s` (vs. `yolov8n` locally) for 100 epochs (vs. 5). Deliberately uses the **same run names** as the local training (`pcb_defects_yolo`, `packaging_damage_yolo`) so bringing weights home is a plain file overwrite — no path changes needed in `app.py` or anywhere else.
+- **Part 2 (PatchCore)** — mounts Google Drive, copies in an MVTec archive the user has to supply themselves (still license-gated — Colab doesn't remove that constraint), then retrains `metal_nut` with `wide_resnet50_2` at 512px (vs. `resnet18` at 256px locally). A 2b sub-section loops over an editable list of additional categories for whenever the user provides more archives — this is the mechanism that will eventually satisfy the "more MVTec categories" roadmap item, but it stays inert (`EXTRA_CATEGORIES = []`) until archives exist.
+- **Download** — zips `models/` and downloads it, with explicit instructions on which files map to which local paths.
+
+**What's blocked and why:** the "expand PatchCore to more categories" task cannot progress further right now — MVTec AD requires registering on MVTec's site and downloading category archives under their research license, which is not something that can be done anonymously or without the user's credentials. The notebook is ready to consume more categories the moment archives exist; nothing else needs to change.
