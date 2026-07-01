@@ -585,3 +585,14 @@ Built `notebooks/colab_training.ipynb` as a single notebook covering both remain
 - **Download** — zips `models/` and downloads it, with explicit instructions on which files map to which local paths.
 
 **What's blocked and why:** the "expand PatchCore to more categories" task cannot progress further right now — MVTec AD requires registering on MVTec's site and downloading category archives under their research license, which is not something that can be done anonymously or without the user's credentials. The notebook is ready to consume more categories the moment archives exist; nothing else needs to change.
+
+### 11.5 Bug Fix: `_download_mvtec` Couldn't Add Categories Incrementally
+
+Caught while preparing to actually add more categories: `_download_mvtec()`'s very first check was `_mvtec_categories_present(target)` — true the moment *any* category (e.g. the existing `metal_nut`) is extracted — which returned immediately, **before ever looking for new archives**. Dropping `bottle.tar.xz` next to an already-extracted `metal_nut/` and re-running the loader would have silently done nothing. Compounding this, the archive finder (`_find_local_archive`, singular) only ever returned the *first* matching archive it found, ignoring any others.
+
+Fixed both issues:
+- `_find_local_archives` (plural) now returns every local archive, not just one.
+- `_download_mvtec` extracts each archive whose category isn't already present, regardless of what else is already extracted. A new `_infer_archive_category()` helper matches an archive's filename against the known 15 MVTec category names (e.g. `bottle.tar.xz` -> `"bottle"`) to decide whether to skip it.
+- Every processed archive (extracted *or* skipped) gets renamed with an `.extracted` suffix so it's never re-scanned — this also sidesteps a real Windows `PermissionError` hit while testing the fix: re-extracting an archive into an *already-populated* folder can fail on files Windows has locked/marked read-only from the original extraction. Skipping already-done categories entirely (rather than re-extracting them) avoids ever touching those files again.
+
+Verified: re-ran the loader against the existing `metal_nut.tar.xz` (never renamed from the original Phase 1 session) — it correctly skipped extraction, renamed the archive to `metal_nut.tar.xz.extracted`, left the 220 `train/good` images untouched, and a second re-run correctly fell through to the "already structured" no-op path.

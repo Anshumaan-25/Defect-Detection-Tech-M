@@ -205,9 +205,12 @@ def _download_mvtec(spec: DatasetSpec) -> Path:
           categories: ["bottle", "cable"]   # optional subset to verify; [] = all 15
 
     Resolution order:
-      1. Target already holds the structured dataset -> nothing to download.
-      2. An archive sits in the target dir (you downloaded it manually) -> extract.
-      3. A real ``url`` is given -> stream + extract it.
+      1. Local archive(s) sit in the target dir (you downloaded them manually)
+         -> extract any not yet extracted. This runs even when other categories
+         are already present, so you can add e.g. bottle.tar.xz next to an
+         already-extracted metal_nut/ and just re-run this loader.
+      2. Nothing local, but the target is already fully structured -> no-op.
+      3. Nothing local or structured, but a real ``url`` is given -> stream + extract it.
       4. Otherwise raise with instructions (the common license-gated case).
 
     Result is the canonical MVTec layout anomalib consumes::
@@ -218,29 +221,45 @@ def _download_mvtec(spec: DatasetSpec) -> Path:
     target = spec.target_dir()          # data/raw/anomaly/mvtec_ad
     target.mkdir(parents=True, exist_ok=True)
 
-    if _mvtec_categories_present(target):
+    archives = _find_local_archives(target)
+    if archives:
+        for archive in archives:
+            category = _infer_archive_category(archive)
+            already_done = category is not None and (target / category / "train" / "good").is_dir()
+            if already_done:
+                # Known category, already extracted -- never touch its files
+                # again (re-extracting into an existing folder can hit Windows
+                # permission errors on already-written files, and is wasted
+                # work regardless). Just mark it handled.
+                logger.info("Category '%s' already extracted, skipping: %s", category, archive.name)
+            else:
+                logger.info("Extracting MVTec archive: %s", archive.name)
+                _extract_archive(archive, target)
+            # Rename so a re-run never re-processes it (idempotent + avoids
+            # wastefully re-unpacking a multi-GB archive on every future run).
+            archive.rename(archive.with_name(archive.name + ".extracted"))
+        _flatten_mvtec(target)
+    elif _mvtec_categories_present(target):
         logger.info("MVTec AD already structured at %s — skipping download.", target)
-        return _verify_mvtec(target, params.get("categories"))
-
-    archive = _find_local_archive(target)
-    url = params.get("url", "") or ""
-    if archive is not None:
-        logger.info("Using locally provided MVTec archive: %s", archive)
-    elif url and not url.startswith("REPLACE_ME"):
-        archive = target / Path(url.split("?")[0]).name
-        if not archive.exists():
-            _stream_download(url, archive)
     else:
-        raise RuntimeError(
-            "MVTec AD is license-gated and no source was found. Either:\n"
-            "  - register + download 'mvtec_anomaly_detection.tar.xz' from "
-            "https://www.mvtec.com/company/research/datasets/mvtec-ad and drop it "
-            f"into {target}/ , then re-run; or\n"
-            "  - host it on a URL you control and set params.url in datasets.yaml."
-        )
+        url = params.get("url", "") or ""
+        if url and not url.startswith("REPLACE_ME"):
+            archive = target / Path(url.split("?")[0]).name
+            if not archive.exists():
+                _stream_download(url, archive)
+            _extract_archive(archive, target)
+            archive.rename(archive.with_name(archive.name + ".extracted"))
+            _flatten_mvtec(target)
+        else:
+            raise RuntimeError(
+                "MVTec AD is license-gated and no source was found. Either:\n"
+                "  - register + download category archives (or the full "
+                "'mvtec_anomaly_detection.tar.xz') from "
+                "https://www.mvtec.com/company/research/datasets/mvtec-ad and drop them "
+                f"into {target}/ , then re-run; or\n"
+                "  - host one on a URL you control and set params.url in datasets.yaml."
+            )
 
-    _extract_archive(archive, target)
-    _flatten_mvtec(target)
     return _verify_mvtec(target, params.get("categories"))
 
 
@@ -251,13 +270,30 @@ def _mvtec_categories_present(root: Path) -> bool:
     return any((sub / "train" / "good").is_dir() for sub in root.iterdir() if sub.is_dir())
 
 
-def _find_local_archive(root: Path) -> Path | None:
-    """Return a manually-downloaded MVTec archive in ``root``, if one is present."""
+def _infer_archive_category(archive: Path) -> str | None:
+    """If ``archive``'s filename exactly matches a known category (e.g.
+    ``bottle.tar.xz`` -> ``"bottle"``), return that name; else None.
+
+    This only matches MVTec's official per-category archive naming. The full
+    bundle (``mvtec_anomaly_detection.tar.xz``) doesn't match any single
+    category, so it always falls through to a real extraction attempt.
+    """
+    stem = archive.name.split(".")[0]
+    return stem if stem in MVTEC_CATEGORIES else None
+
+
+def _find_local_archives(root: Path) -> list[Path]:
+    """Return every manually-downloaded MVTec archive in ``root`` (not just one).
+
+    Supports adding categories incrementally: drop a new ``bottle.tar.xz`` next
+    to an already-extracted ``metal_nut/`` and it will be picked up here too.
+    Already-extracted archives are renamed with an ``.extracted`` suffix by the
+    caller so they never show up in this scan again.
+    """
+    found: list[Path] = []
     for pattern in ("*.tar.xz", "*.tar.gz", "*.tgz", "*.tar", "*.zip"):
-        matches = sorted(root.glob(pattern))
-        if matches:
-            return matches[0]
-    return None
+        found.extend(sorted(root.glob(pattern)))
+    return found
 
 
 def _flatten_mvtec(root: Path) -> None:
