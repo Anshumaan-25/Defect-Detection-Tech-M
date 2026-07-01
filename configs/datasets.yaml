@@ -30,15 +30,16 @@ datasets:
       version: "latest"     # resolved to the highest version at download time
       format: "yolov8"
 
-  # --- Object detection: damaged packaging (bottle inspection) ------------
-  - name: bottle_inspection
+  # --- Object detection: damaged packaging ---------------------------------
+  # Source: https://universe.roboflow.com/packaging-defect-detection/package-defect-detection-loin8
+  - name: packaging_damage
     modality: yolo
     source: roboflow
-    enabled: false
+    enabled: true
     params:
-      workspace: "REPLACE_ME_workspace_slug"
-      project: "REPLACE_ME_project_slug"
-      version: 1
+      workspace: "packaging-defect-detection"
+      project: "package-defect-detection-loin8"
+      version: "latest"     # resolved to the highest version at download time
       format: "yolov8"
 
   # --- Surface defects: MVTec AD (anomaly detection) ----------------------

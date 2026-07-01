@@ -170,6 +170,10 @@ class DefectInspector:
         Defaults to the most-recently-modified run under ``models/anomaly/``.
     yolo_weights : path-like, optional
         Path to YOLO weights (.pt). Defaults to ``yolov8n.pt`` in the project root.
+    packaging_yolo_weights : path-like, optional
+        Path to a second, packaging-damage YOLO model (.pt). When given, pass
+        ``yolo_variant="packaging"`` to :meth:`inspect` to run this model instead
+        of the primary one. None (default) skips loading a second model.
     device : str, optional
         Target device. One of: "auto" | "cpu" | "cuda" | "<int gpu index>".
         Defaults to "auto" — uses GPU when available, CPU otherwise.
@@ -188,6 +192,7 @@ class DefectInspector:
         self,
         anomaly_run_dir: str | Path | None = None,
         yolo_weights: str | Path | None = None,
+        packaging_yolo_weights: str | Path | None = None,
         device: str | None = "auto",
         anomaly_threshold: float | None = None,
         enable_ocr: bool = True,
@@ -198,6 +203,9 @@ class DefectInspector:
         logger.info("DefectInspector initialising on device: %s", self.device)
 
         self._yolo = self._load_yolo(yolo_weights)
+        self._packaging_yolo = (
+            self._load_yolo(packaging_yolo_weights) if packaging_yolo_weights else None
+        )
         self._anomaly_inferencer = self._load_patchcore(anomaly_run_dir)
         self._ocr_reader = self._load_ocr(ocr_languages) if enable_ocr else None
 
@@ -260,6 +268,7 @@ class DefectInspector:
         self,
         image: str | Path | np.ndarray | Image.Image,
         expected_text: str | None = None,
+        yolo_variant: str = "pcb",
     ) -> dict[str, Any]:
         """Run the full defect inspection pipeline on a single image.
 
@@ -273,6 +282,11 @@ class DefectInspector:
             enabled), the result's ``ocr.label_ok`` flags whether it was found —
             i.e. wrong-label detection. When None, OCR still reads any text but
             ``label_ok`` stays None (nothing to compare against).
+        yolo_variant : str, optional
+            Which loaded YOLO model to run detections with: "pcb" (default, the
+            primary model passed as ``yolo_weights``) or "packaging" (the model
+            passed as ``packaging_yolo_weights`` — falls back to the primary
+            model if none was loaded).
 
         Returns
         -------
@@ -289,8 +303,11 @@ class DefectInspector:
         pil_image = _to_pil(image)
 
         # Each model runs independently — a failure in one doesn't abort the others.
+        yolo_model = self._yolo
+        if yolo_variant == "packaging" and self._packaging_yolo is not None:
+            yolo_model = self._packaging_yolo
         try:
-            result["detections"] = self._run_yolo(pil_image)
+            result["detections"] = self._run_yolo(pil_image, model=yolo_model)
         except Exception as exc:
             msg = f"YOLO detection failed: {exc}"
             logger.warning(msg)
@@ -320,11 +337,16 @@ class DefectInspector:
     # Model runners
     # ─────────────────────────────────────────────────────────────────────────
 
-    def _run_yolo(self, image: Image.Image) -> list[dict]:
-        """Return a list of YOLO detection dicts (label, confidence, box)."""
+    def _run_yolo(self, image: Image.Image, model=None) -> list[dict]:
+        """Return a list of YOLO detection dicts (label, confidence, box).
+
+        ``model`` selects which loaded YOLO instance to run; defaults to the
+        primary detector (``self._yolo``) when not given.
+        """
+        model = model if model is not None else self._yolo
         # ultralytics expects a CUDA index string ("0") or "cpu", not "cuda:0"
         yolo_device = self.device.replace("cuda:", "") if "cuda" in self.device else "cpu"
-        raw_results = self._yolo(image, device=yolo_device, verbose=False)
+        raw_results = model(image, device=yolo_device, verbose=False)
 
         detections: list[dict] = []
         for r in raw_results:

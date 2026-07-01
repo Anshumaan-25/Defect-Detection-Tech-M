@@ -13,9 +13,11 @@ A complete reference for understanding and explaining the pipeline (e.g. in a re
 | Defect type | Technique | Model / Tool | Status |
 |---|---|---|---|
 | Surface defects (scratches, dents) | **Anomaly detection** | PatchCore (anomalib) | ✅ Trained — AUROC 0.9946 |
-| Missing components | **Object detection** | YOLOv8 (ultralytics) | ✅ Trained — mAP50 0.978 |
+| Missing components (PCB) | **Object detection** | YOLOv8 (ultralytics) | ✅ Trained — mAP50 0.978 |
 | Wrong labels | **OCR + text compare** | EasyOCR | ✅ Working (no training needed) |
-| Damaged packaging | **Object detection** | YOLOv8 (same family) | ⏸ Needs a packaging dataset |
+| Damaged packaging | **Object detection** | YOLOv8 (same family) | ✅ Trained — mAP50 0.810 |
+
+*(All four defect types now have a working, trained detector as of the Phase 2 update — see `DEVELOPMENT_JOURNEY.md` §11 for the full story, including a dataset-selection dead end worth knowing about.)*
 
 **Why three different techniques?** Each defect is a fundamentally different problem:
 

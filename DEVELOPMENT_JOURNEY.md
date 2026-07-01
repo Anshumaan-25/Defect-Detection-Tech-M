@@ -458,26 +458,32 @@ Validated on a **real PCB photo** (`samples/OCR_test-E3330BM.jpg`) by verifying 
 | YOLO training | ✅ Complete | yolov8n, mAP50 0.978 across 6 PCB defect classes |
 | OCR / wrong-label path | ✅ Complete | EasyOCR wired into `DefectInspector`; logic validated |
 | Demo tools | ✅ Complete | `inspect_image.py` (anomaly panel) + `demo_yolo.py` (PCB boxes) |
+| Gradio demo app | ✅ Complete | `app.py`; mode selector across all 4 defect types; one-click examples |
+| Damaged-packaging YOLO detector | ✅ Complete | yolov8n on `packaging_damage`; mAP50 0.810; wired into `DefectInspector` as `yolo_variant="packaging"` |
+
+**All four originally-scoped defect classes now have a working detector** (surface / missing-components / wrong-labels / damaged-packaging). Phase 2 (§11) is about strengthening what's here, not filling gaps.
 
 ### What Is Not Yet Built
 
 | Component | Priority | Notes |
 |---|---|---|
-| Streamlit / Gradio demo UI | High | Final deliverable; wraps `DefectInspector.inspect()` |
-| Longer / bigger YOLO retrain | Medium | `yolov8s`, more epochs on Colab to lift mAP50-95 + generalisation |
+| Longer / bigger YOLO retrain | Medium | `yolov8s`, more epochs on Colab to lift mAP50-95 + generalisation (both PCB and packaging) |
 | Google Colab training notebook | Medium | Scale-up path for YOLO + larger PatchCore backbone |
-| More MVTec categories | Low | Only `metal_nut` trained; loader/trainer support all 15 |
+| More MVTec categories | Low | Only `metal_nut` trained; loader/trainer support all 15; **blocked** — license-gated, needs another archive from the user |
 | OCR on etched/varied labels | Low | Works on printed markings (ELEC-1); etched silkscreen (E3330BM) misreads |
+| Batch/report mode + public deployment | Medium | Phase 2 final step (§11) — folder-of-images CSV/PDF report + Hugging Face Spaces |
 
 ### Key File Locations
 
 - **Trained PatchCore model:** `models/anomaly/mvtec_ad_metal_nut_patchcore/weights/torch/model.pt`
-- **Trained YOLO model:** `models/yolo/pcb_defects_yolo/weights/best.pt`
+- **Trained PCB YOLO model:** `models/yolo/pcb_defects_yolo/weights/best.pt`
+- **Trained packaging YOLO model:** `models/yolo/packaging_damage_yolo/weights/best.pt`
 - **Base YOLO weights:** `yolov8n.pt` (project root)
 - **MVTec AD data:** `data/raw/anomaly/mvtec_ad/metal_nut/`
 - **PCB data:** `data/raw/yolo/pcb_defects/`
+- **Packaging data:** `data/raw/yolo/packaging_damage/`
 - **Dataset registry:** `configs/datasets.yaml`
-- **Demo tools:** `inspect_image.py` (anomaly panel), `demo_yolo.py` (PCB boxes)
+- **Demo tools:** `inspect_image.py` (anomaly panel), `demo_yolo.py` (PCB boxes), `app.py` (full Gradio UI, all 4 modes)
 
 ---
 
@@ -498,4 +504,67 @@ Validated on a **real PCB photo** (`samples/OCR_test-E3330BM.jpg`) by verifying 
 
 - **PatchCore with `wide_resnet50_2`** on Colab (16GB VRAM): change `--backbone wide_resnet50_2 --image-size 512 --batch 32`. Expected Image AUROC improvement of ~0.5–1% on metal_nut.
 - **Multi-category training:** The dataset loader and trainer both support all 15 MVTec AD categories. Training all 15 in a loop is a one-liner once the full archive is available.
-- **Custom YOLO dataset:** The `bottle_inspection` entry in `datasets.yaml` is ready to be filled in with a Roboflow project slug for packaging defect detection.
+- **Custom YOLO dataset:** The `packaging_damage` entry in `datasets.yaml` covers packaging defect detection (see Phase 2 below).
+
+---
+
+## 11. Phase 2 — Post-Presentation Roadmap
+
+*(Started 2026-07-02, after the first successful team presentation.)* The presentation went well; rather than stop, the plan is to go back over the same four ideas raised at the end of Phase 1 and execute them **one at a time, in this order**, each documented here as it lands. Nothing in the sections above is being rewritten — this section (and the ones that follow it) is where ongoing work gets logged, per the standing protocol at the top of this file.
+
+### The Phase 2 plan, in order
+
+1. **Damaged-packaging YOLO detector** — the 4th and last defect class this project set out to cover. Closes the gap left in §9 ("What Is Not Yet Built").
+2. **Retrain the PCB YOLO detector on Colab** — bigger backbone (`yolov8s`) and more epochs, to lift mAP50-95 (currently 0.672) beyond what the local 4GB/Optimus-limited GPU could reasonably do.
+3. **Expand PatchCore to more MVTec categories** — train 2-3 more categories beyond `metal_nut` (e.g. `bottle`, `cable`) to demonstrate the anomaly-detection approach generalises, ideally with the larger `wide_resnet50_2` backbone on Colab.
+4. **Product-ify the demo** — batch/report mode (point at a folder, get a CSV/PDF QC report) and public deployment (e.g. Hugging Face Spaces) so the app isn't tied to one laptop. Deliberately last: it's the polish layer on top of a pipeline that, by this point, will cover all four defect classes with stronger numbers.
+
+### 11.1 Damaged-Packaging Detector — Dataset Selection
+
+Searched Roboflow Universe for a real, downloadable damaged-packaging dataset (the earlier `bottle_inspection` entry in `datasets.yaml` was only ever a placeholder with `REPLACE_ME` slugs — never a real dataset). Evaluated three real candidates:
+
+| Candidate | Workspace/project | Classes | Size | Verdict |
+|---|---|---|---|---|
+| `object-detection-5pf5v/packaging-defect-detection-wbcpk` | 2 classes: `Box`, `date` | — | Not damage-related (box + date-label detection) — rejected |
+| `packaging-defect-detection/package-defect-detection-loin8` | 2 classes: `defected`, `non_defected` | — (size unconfirmed) | Clean framing but couldn't confirm size/splits |
+| **`iot-project/damaged-package-detection`** ✅ chosen | 5 classes (damaged / damaged food packaging box / food item boxes / packaging boxes / packaging boxes that are damaged) | **~1,000 images** (794 train / 103 valid / 103 test) | Chosen — real, verified stats, free via Roboflow API |
+
+Picked `iot-project/damaged-package-detection` — it's the one candidate with concrete, verified image counts and split sizes rather than an unconfirmed page. The class list looks messier than the PCB dataset's on paper, but Roboflow's own preprocessing note ("Modify Classes: 4 remapped, 0 dropped") suggests the effective label set is smaller in practice; the real breakdown is captured from the downloaded `data.yaml`, not hand-curated here.
+
+Wired into `configs/datasets.yaml` as a new `packaging_damage` entry (replacing the old placeholder), same pattern as `pcb_defects`: `source: roboflow`, `version: "latest"`.
+
+**A real download failure worth recording:** the first candidate actually attempted, `iot-project/damaged-package-detection` (the one with the cleanest-looking stats), turned out to be a Roboflow **classification** project, not object detection — `dataset_loader.py` connected fine and resolved `version: "latest" -> v4`, but the export call failed with `"yolov8 is an invalid format for project type classification. Please use one of: folder, clip."` Roboflow's own project-type metadata isn't visible from search snippets, so this was only caught by actually attempting the download. Switched to `packaging-defect-detection/package-defect-detection-loin8` (confirmed real object-detection project, CC BY 4.0), which downloaded cleanly.
+
+**Downloaded dataset:** 2,852 images (2,496 train / 240 valid / 116 test), 2 classes (`defected`, `non_defected`). Spot-checked label files across several images — most have multiple, differently-positioned/sized boxes per image (not just one full-frame box), confirming this is genuine localized object detection, not a classification dataset dressed up as one. Filename analysis showed 207 unique source photos in the train split, each augmented ~12× by Roboflow (standard flip/rotate/brightness augmentation) — a normal and expected pattern, not a red flag. Visual spot-check of the raw images: consistently dark/grainy, low-light photography (e.g. one frame shows a visible crack line in a jar body near its cap) — genuine but not high-production-value imagery.
+
+### 11.2 Damaged-Packaging Detector — Training & Results
+
+Trained with the same proven settings as the PCB detector (`yolov8n`, batch 16, imgsz 640, workers 8, 5 epochs, device 0):
+
+```bash
+python -m src.train_yolo --dataset packaging_damage --epochs 5 --batch 16 --imgsz 640 --workers 8 --device 0 --name packaging_damage_yolo
+```
+
+| Class | Precision | Recall | mAP50 | mAP50-95 |
+|---|---|---|---|---|
+| **all** | **0.646** | **0.871** | **0.810** | **0.789** |
+| defected | 0.775 | 0.750 | 0.865 | 0.843 |
+| non_defected | 0.518 | 0.991 | 0.755 | 0.736 |
+
+**Honest read:** overall mAP50 0.81 is solid for a 5-epoch smoke test, but precision on `non_defected` (0.518) is notably weaker than the PCB detector's numbers — the model over-predicts `non_defected` (very high recall, 0.991, but more false positives), which tracks with the dataset's dark/grainy imagery and modest source-photo diversity (207 unique photos). `defected` — the class that actually matters for catching real damage — has better precision (0.775) and a strong mAP50 (0.865). Same caveat as the PCB run applies: this is a smoke test, not a final production model; the Colab retrain (task 2 of the Phase 2 plan) is where both detectors get a real epoch count and a bigger backbone.
+
+Weights: `models/yolo/packaging_damage_yolo/weights/best.pt`.
+
+### 11.3 Wiring a Second YOLO Model into `DefectInspector`
+
+`DefectInspector` was built around a single YOLO model. Adding a second, domain-specific detector (packaging) without breaking the existing PCB path needed a small, backward-compatible extension rather than a rewrite:
+
+- **`__init__`** gained an optional `packaging_yolo_weights` param. When given, a second `ultralytics.YOLO` instance is loaded into `self._packaging_yolo` alongside the existing `self._yolo` (PCB). When omitted, behaviour is unchanged.
+- **`inspect()`** gained a `yolo_variant: str = "pcb"` param. `"pcb"` (the default) runs the primary model exactly as before; `"packaging"` runs the packaging model if one was loaded, silently falling back to the primary model otherwise (so old call sites never break).
+- **`_run_yolo()`** now accepts an optional `model=` argument (defaulting to `self._yolo`), so the same detection-parsing logic serves both models without duplication.
+
+This is deliberately minimal — no plugin registry, no dict-of-models abstraction — because there are exactly two YOLO use cases today and the parameter approach reads clearly at both call sites. If a third YOLO domain shows up later, that's the point to generalise to a named-model dict.
+
+**In `app.py`:** a new `MODE_PACKAGING` mode was added alongside the existing three. The existing `_pcb_view()` renderer (boxes + class/confidence table) is fully generic over `result["detections"]`, so it's reused as-is for packaging — no new view function needed. The mode dispatch in the `inspect()` callback picks `yolo_variant="packaging"` when `mode == MODE_PACKAGING`, otherwise `"pcb"`. An example image was chosen by scanning the whole test set for the highest-confidence `defected` prediction (found at conf 0.89) rather than picking arbitrarily — same principle as the PCB "Missing_Hole" example from Phase 1.
+
+Verified end-to-end through the running app (not just unit-level): packaging image → 1 defect detected; PCB image → unchanged regression check still passes (confirming the two-model routing doesn't cross-contaminate).

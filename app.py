@@ -6,6 +6,7 @@ so each detector runs only where it's meaningful:
 
     * Surface defects (metal nut)  -> PatchCore anomaly heatmap + NORMAL/DEFECTIVE
     * PCB defects                  -> YOLO boxes + per-class detection table
+    * Damaged packaging            -> YOLO boxes (defected/non_defected) + table
     * Label check (OCR)            -> EasyOCR text read + WRONG-LABEL verdict
 
 Run it:
@@ -34,17 +35,21 @@ from inspect_image import normalize_map, build_overlay_panel, build_original_pan
 # ── Mode labels ──────────────────────────────────────────────────────────────
 MODE_SURFACE = "Surface defects (metal nut)"
 MODE_PCB = "PCB defects"
+MODE_PACKAGING = "Damaged packaging"
 MODE_LABEL = "Label check (OCR)"
-MODES = [MODE_SURFACE, MODE_PCB, MODE_LABEL]
+MODES = [MODE_SURFACE, MODE_PCB, MODE_PACKAGING, MODE_LABEL]
 
 PCB_WEIGHTS = PROJECT_ROOT / "models/yolo/pcb_defects_yolo/weights/best.pt"
+PACKAGING_WEIGHTS = PROJECT_ROOT / "models/yolo/packaging_damage_yolo/weights/best.pt"
 
 # ── Load all models once at startup ──────────────────────────────────────────
-# YOLO uses the trained PCB detector so "PCB defects" mode is meaningful;
+# Primary YOLO is the trained PCB detector; a second YOLO model (packaging
+# damage) is loaded alongside it and selected via yolo_variant="packaging".
 # PatchCore auto-loads the latest anomaly run (metal_nut); EasyOCR for labels.
 print("Loading models (this takes a few seconds)…")
 INSPECTOR = DefectInspector(
     yolo_weights=str(PCB_WEIGHTS) if PCB_WEIGHTS.exists() else None,
+    packaging_yolo_weights=str(PACKAGING_WEIGHTS) if PACKAGING_WEIGHTS.exists() else None,
     device="auto",
     enable_ocr=True,
 )
@@ -58,7 +63,8 @@ def inspect(mode: str, image, expected_text: str):
         return None, "### ⚠️ Please upload an image first.", ""
 
     pil = image.convert("RGB") if isinstance(image, Image.Image) else Image.fromarray(image).convert("RGB")
-    result = INSPECTOR.inspect(pil, expected_text=(expected_text or None))
+    yolo_variant = "packaging" if mode == MODE_PACKAGING else "pcb"
+    result = INSPECTOR.inspect(pil, expected_text=(expected_text or None), yolo_variant=yolo_variant)
 
     if result["errors"]:
         # Surface any per-detector failure but keep going with whatever succeeded.
@@ -68,7 +74,7 @@ def inspect(mode: str, image, expected_text: str):
 
     if mode == MODE_SURFACE:
         return _surface_view(pil, result, err)
-    if mode == MODE_PCB:
+    if mode in (MODE_PCB, MODE_PACKAGING):
         return _pcb_view(pil, result, err)
     return _label_view(pil, result, expected_text, err)
 
@@ -86,6 +92,8 @@ def _surface_view(pil, result, err):
 
 
 def _pcb_view(pil, result, err):
+    """Shared view for any YOLO-box mode (PCB defects and damaged packaging) —
+    both just render detections as boxes + a class/confidence table."""
     dets = result["detections"]
     annotated = build_original_panel(pil, dets)
     n = len(dets)
@@ -126,6 +134,13 @@ def _examples():
                       if p.suffix.lower() in {".jpg", ".jpeg", ".png"}), None)
         if first:
             candidates.append([MODE_PCB, str(first), ""])
+    # Packaging example: a real test image the trained model confidently
+    # (0.89) flags as "defected".
+    packaging_example = (
+        PROJECT_ROOT / "data/raw/yolo/packaging_damage/test/images"
+        / "20240916_194321_jpg.rf.86272b6b3daac59f00146eddeb17ae3f.jpg"
+    )
+    candidates.append([MODE_PACKAGING, str(packaging_example), ""])
     # Label-check example: real PCB board marking (verify "ELEC-1").
     # One click loads image + expected text.
     candidates.append([MODE_LABEL, "samples/OCR_test-E3330BM.jpg", "ELEC-1"])
@@ -138,7 +153,7 @@ def build_ui() -> gr.Blocks:
         gr.Markdown(
             "# 🔍 Defect Detection — Live Demo\n"
             "Pick an **inspection mode**, upload an image, and click **Inspect**. "
-            "Models: PatchCore (surface anomalies) · YOLOv8 (PCB defects) · EasyOCR (labels)."
+            "Models: PatchCore (surface anomalies) · YOLOv8 (PCB defects, damaged packaging) · EasyOCR (labels)."
         )
         with gr.Row():
             with gr.Column(scale=1):
