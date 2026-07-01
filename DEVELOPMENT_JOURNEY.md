@@ -449,7 +449,7 @@ Validated on a **real PCB photo** (`samples/OCR_test-E3330BM.jpg`) by verifying 
 |---|---|---|
 | `src/config.py` | ✅ Complete | All paths, registry loading, `DatasetSpec` dataclass |
 | `src/dataset_loader.py` | ✅ Complete | Roboflow, URL, and MVTec AD handlers; CLI |
-| `configs/datasets.yaml` | ✅ Complete | PCB defects (enabled), MVTec AD (enabled), bottle (disabled) |
+| `configs/datasets.yaml` | ✅ Complete | PCB defects, packaging damage, and MVTec AD all enabled |
 | MVTec AD extraction | ✅ Complete | `metal_nut` category fully extracted and verified |
 | `src/train_anomaly.py` | ✅ Complete | PatchCore/ResNet18 on MVTec AD; CLI; export |
 | PatchCore training | ✅ Complete | Image AUROC 0.9946 on metal_nut |
@@ -516,7 +516,7 @@ Validated on a **real PCB photo** (`samples/OCR_test-E3330BM.jpg`) by verifying 
 
 1. **Damaged-packaging YOLO detector** — the 4th and last defect class this project set out to cover. Closes the gap left in §9 ("What Is Not Yet Built").
 2. **Retrain the PCB YOLO detector on Colab** — bigger backbone (`yolov8s`) and more epochs, to lift mAP50-95 (currently 0.672) beyond what the local 4GB/Optimus-limited GPU could reasonably do.
-3. **Expand PatchCore to more MVTec categories** — train 2-3 more categories beyond `metal_nut` (e.g. `bottle`, `cable`) to demonstrate the anomaly-detection approach generalises, ideally with the larger `wide_resnet50_2` backbone on Colab.
+3. **Expand PatchCore to more MVTec categories** — train 2-3 more categories beyond `metal_nut`, chosen to keep the project's story industrial/mechanical: `screw` (fastener, complements `metal_nut`), `transistor` (electronic component, ties to the PCB/electronics theme), `cable` (electrical/industrial wiring). Ideally with the larger `wide_resnet50_2` backbone on Colab.
 4. **Product-ify the demo** — batch/report mode (point at a folder, get a CSV/PDF QC report) and public deployment (e.g. Hugging Face Spaces) so the app isn't tied to one laptop. Deliberately last: it's the polish layer on top of a pipeline that, by this point, will cover all four defect classes with stronger numbers.
 
 ### 11.1 Damaged-Packaging Detector — Dataset Selection
